@@ -1,16 +1,11 @@
 const SECTIONS = [
-  {
-    id: "home",
-    hash: "#/",
-    label: "Обзор",
-    title: "Обзор",
-  },
+  { id: "home", hash: "#/", label: "Обзор" },
   {
     id: "knowledge",
     hash: "#/knowledge",
     label: "База знаний",
     title: "База знаний",
-    hint: "Конспекты, темы и короткие записи, к которым можно вернуться.",
+    hint: "Объяснения к коллоквиуму по сенсорным системам. Открывайте тему и читайте вслух структуру ответа.",
     empty: "Записей пока нет",
     collection: "notes",
   },
@@ -19,7 +14,7 @@ const SECTIONS = [
     hash: "#/cards",
     label: "Карточки",
     title: "Карточки",
-    hint: "Лицевая сторона — вопрос, оборот — ответ. Для самопроверки.",
+    hint: "Короткий вопрос на лице. Нажмите карточку, чтобы увидеть ответ, затем переходите дальше.",
     empty: "Карточек пока нет",
     collection: "cards",
   },
@@ -28,7 +23,7 @@ const SECTIONS = [
     hash: "#/tests",
     label: "Тесты",
     title: "Тесты",
-    hint: "Вопрос, варианты и отметка, насколько уверенно вы ответили.",
+    hint: "Один верный вариант. После выбора сразу видно пояснение.",
     empty: "Вопросов пока нет",
     collection: "questions",
   },
@@ -37,7 +32,7 @@ const SECTIONS = [
     hash: "#/tickets",
     label: "Билеты",
     title: "Билеты",
-    hint: "Экзаменационные билеты: номер, вопросы и то, что уже разобрано.",
+    hint: "Вопросы к зачёту. Сначала ответьте сами, потом откройте опору.",
     empty: "Билетов пока нет",
     collection: "tickets",
   },
@@ -46,11 +41,35 @@ const SECTIONS = [
 const nav = document.getElementById("nav");
 const view = document.getElementById("view");
 
+const study = {
+  card: 0,
+  flipped: false,
+  quiz: 0,
+  picked: null,
+  correct: 0,
+  answered: 0,
+  ticket: null,
+};
+
+function esc(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function currentId() {
   const hash = location.hash || "#/";
   if (hash === "#/" || hash === "#") return "home";
-  const found = SECTIONS.find((section) => section.hash === hash);
+  const found = SECTIONS.find((section) => hash === section.hash || hash.startsWith(section.hash + "/"));
   return found ? found.id : "home";
+}
+
+function noteId() {
+  const hash = location.hash || "";
+  if (!hash.startsWith("#/knowledge/")) return "";
+  return decodeURIComponent(hash.slice("#/knowledge/".length));
 }
 
 function renderNav() {
@@ -66,18 +85,10 @@ function renderNav() {
 function pageHead(title, hint) {
   return `
     <header class="page-head">
-      <p class="eyebrow">Каркас</p>
-      <h1>${title}</h1>
-      ${hint ? `<p class="lede">${hint}</p>` : ""}
+      <p class="eyebrow">Сенсорные системы</p>
+      <h1>${esc(title)}</h1>
+      ${hint ? `<p class="lede">${esc(hint)}</p>` : ""}
     </header>`;
-}
-
-function emptyState(text) {
-  return `
-    <div class="empty">
-      <p class="empty-title">${text}</p>
-      <p class="empty-text">Место под ваши материалы. Сейчас коллекция пустая.</p>
-    </div>`;
 }
 
 function renderHome(data) {
@@ -87,8 +98,8 @@ function renderHome(data) {
       return `
         <a class="tile" href="${section.hash}">
           <span class="tile-count">${count}</span>
-          <span class="tile-label">${section.label}</span>
-          <span class="tile-hint">${section.hint}</span>
+          <span class="tile-label">${esc(section.label)}</span>
+          <span class="tile-hint">${esc(section.hint)}</span>
         </a>`;
     })
     .join("");
@@ -96,114 +107,201 @@ function renderHome(data) {
   view.innerHTML = `
     ${pageHead(
       "Кабинет",
-      "Личное место для конспектов и подготовки к экзаменам. Пока здесь только каркас разделов."
+      "Подготовка к коллоквиуму по физиологии сенсорных систем: объяснения, карточки, тест и устные билеты."
     )}
     <section class="tiles">${tiles}</section>`;
 }
 
-function renderList(section, data) {
-  const items = data[section.collection];
-  const body = items.length
-    ? `<ul class="list">${items
-        .map((item) => `<li class="list-item">${item.title || "Без названия"}</li>`)
-        .join("")}</ul>`
-    : emptyState(section.empty);
-
-  view.innerHTML = `
-    ${pageHead(section.title, section.hint)}
-    <section class="panel">${body}</section>`;
+function renderBlocks(blocks) {
+  return blocks
+    .map((block) => {
+      if (block.type === "h") return `<h2>${esc(block.text)}</h2>`;
+      if (block.type === "ul") {
+        return `<ul>${block.items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`;
+      }
+      if (block.type === "note") return `<p class="callout">${esc(block.text)}</p>`;
+      return `<p>${esc(block.text)}</p>`;
+    })
+    .join("");
 }
 
-function renderCards(section, data) {
-  if (!data.cards.length) {
+function renderKnowledge(data) {
+  const id = noteId();
+  const note = data.notes.find((item) => item.id === id);
+  if (note) {
     view.innerHTML = `
-      ${pageHead(section.title, section.hint)}
-      <section class="panel">
-        <button class="flashcard" type="button" id="flashcard" aria-pressed="false">
-          <span class="flash-side" data-side="front">
-            <span class="flash-kicker">Лицо</span>
-            <span class="flash-text">Здесь будет вопрос</span>
-          </span>
-          <span class="flash-side" data-side="back">
-            <span class="flash-kicker">Оборот</span>
-            <span class="flash-text">Здесь будет ответ</span>
-          </span>
-        </button>
-        <p class="caption">Нажмите на карточку, чтобы перевернуть. Это образец механизма, не учебная карточка.</p>
-        ${emptyState(section.empty)}
-      </section>`;
+      <a class="back" href="#/knowledge">Все темы</a>
+      <article class="article">
+        <p class="eyebrow">База знаний</p>
+        <h1>${esc(note.title)}</h1>
+        <p class="lede">${esc(note.lead)}</p>
+        ${renderBlocks(note.blocks)}
+      </article>`;
+    return;
+  }
 
-    const card = document.getElementById("flashcard");
-    card.addEventListener("click", () => {
-      const flipped = card.classList.toggle("is-flipped");
-      card.setAttribute("aria-pressed", String(flipped));
+  view.innerHTML = `
+    ${pageHead("База знаний", "Темы по порядку: сначала общий анализатор, потом каждая система и практические работы.")}
+    <ol class="notes">
+      ${data.notes
+        .map(
+          (item, index) => `
+          <li>
+            <a class="note-link" href="#/knowledge/${encodeURIComponent(item.id)}">
+              <span class="note-num">${String(index + 1).padStart(2, "0")}</span>
+              <span>
+                <span class="note-title">${esc(item.title)}</span>
+                <span class="note-lead">${esc(item.lead)}</span>
+              </span>
+            </a>
+          </li>`
+        )
+        .join("")}
+    </ol>`;
+}
+
+function renderCards(data) {
+  if (!data.cards.length) return;
+  const index = Math.min(study.card, data.cards.length - 1);
+  const card = data.cards[index];
+  view.innerHTML = `
+    ${pageHead("Карточки", "Нажмите на карточку, чтобы перевернуть. Ответьте вслух до того, как откроете оборот.")}
+    <p class="progress-label">${esc(card.topic)} · ${index + 1} из ${data.cards.length}</p>
+    <button class="flashcard${study.flipped ? " is-flipped" : ""}" type="button" id="flashcard" aria-pressed="${study.flipped}">
+      <span class="flash-side" data-side="front">
+        <span class="flash-kicker">Вопрос</span>
+        <span class="flash-text">${esc(card.front)}</span>
+      </span>
+      <span class="flash-side" data-side="back">
+        <span class="flash-kicker">Ответ</span>
+        <span class="flash-text flash-text-answer">${esc(card.back)}</span>
+      </span>
+    </button>
+    <div class="row">
+      <button class="btn" type="button" id="card-prev">Назад</button>
+      <button class="btn btn-primary" type="button" id="card-next">Дальше</button>
+    </div>`;
+
+  document.getElementById("flashcard").addEventListener("click", () => {
+    study.flipped = !study.flipped;
+    render();
+  });
+  document.getElementById("card-prev").addEventListener("click", () => {
+    study.card = (index - 1 + data.cards.length) % data.cards.length;
+    study.flipped = false;
+    render();
+  });
+  document.getElementById("card-next").addEventListener("click", () => {
+    study.card = (index + 1) % data.cards.length;
+    study.flipped = false;
+    render();
+  });
+}
+
+function renderTests(data) {
+  const total = data.questions.length;
+  if (!total) return;
+  if (study.quiz >= total) {
+    view.innerHTML = `
+      ${pageHead("Тест пройден", "Это самопроверка, не оценка. Вернитесь к темам, где пояснение было неожиданным.")}
+      <section class="panel result">
+        <p class="result-score">${study.correct} из ${total}</p>
+        <p>Верных ответов за эту попытку.</p>
+        <button class="btn btn-primary" type="button" id="quiz-restart">Пройти ещё раз</button>
+      </section>`;
+    document.getElementById("quiz-restart").addEventListener("click", () => {
+      study.quiz = 0;
+      study.picked = null;
+      study.correct = 0;
+      study.answered = 0;
+      render();
     });
     return;
   }
 
-  renderList(section, data);
+  const item = data.questions[study.quiz];
+  const locked = study.picked !== null;
+  view.innerHTML = `
+    ${pageHead("Тест", "Выберите один ответ. Пояснение откроется сразу.")}
+    <p class="progress-label">Вопрос ${study.quiz + 1} из ${total} · верно ${study.correct}</p>
+    <div class="quiz-progress"><span style="width: ${Math.round((study.quiz / total) * 100)}%"></span></div>
+    <p class="quiz-prompt">${esc(item.q)}</p>
+    <div class="quiz-options" id="quiz-options">
+      ${item.options
+        .map((option, index) => {
+          let cls = "";
+          if (locked && index === item.answer) cls = " is-right";
+          else if (locked && index === study.picked) cls = " is-wrong";
+          return `<button type="button" class="option${cls}" data-index="${index}" ${locked ? "disabled" : ""}>${esc(option)}</button>`;
+        })
+        .join("")}
+    </div>
+    ${locked ? `<p class="callout">${esc(item.explain)}</p><button class="btn btn-primary" type="button" id="quiz-next">${study.quiz === total - 1 ? "К результату" : "Дальше"}</button>` : ""}`;
+
+  document.querySelectorAll(".option").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (study.picked !== null) return;
+      study.picked = Number(button.dataset.index);
+      if (study.picked === item.answer) study.correct += 1;
+      study.answered += 1;
+      render();
+    });
+  });
+  const next = document.getElementById("quiz-next");
+  if (next) {
+    next.addEventListener("click", () => {
+      study.quiz += 1;
+      study.picked = null;
+      render();
+    });
+  }
 }
 
-function renderTests(section, data) {
-  if (data.questions.length) {
-    renderList(section, data);
-    return;
-  }
-
+function renderTickets(data) {
   view.innerHTML = `
-    ${pageHead(section.title, section.hint)}
-    <section class="panel">
-      <div class="quiz" aria-hidden="true">
-        <div class="quiz-progress"><span style="width: 0%"></span></div>
-        <p class="quiz-prompt">Текст вопроса появится здесь</p>
-        <div class="quiz-options">
-          <button type="button" disabled>Вариант ответа</button>
-          <button type="button" disabled>Вариант ответа</button>
-          <button type="button" disabled>Вариант ответа</button>
-          <button type="button" disabled>Вариант ответа</button>
-        </div>
-      </div>
-      ${emptyState(section.empty)}
-    </section>`;
-}
+    ${pageHead("Билеты", "Одиннадцать устных вопросов по списку зачёта. Откройте опору после своего ответа.")}
+    <ol class="tickets">
+      ${data.tickets
+        .map((ticket, index) => {
+          const open = study.ticket === index;
+          return `
+            <li class="ticket">
+              <button class="ticket-toggle" type="button" data-index="${index}" aria-expanded="${open}">
+                <span class="ticket-num">${String(index + 1).padStart(2, "0")}</span>
+                <span>
+                  <span class="ticket-title">${esc(ticket.title)}</span>
+                  <span class="ticket-meta">${esc(ticket.prompt)}</span>
+                </span>
+              </button>
+              ${open ? `<p class="ticket-answer">${esc(ticket.answer)}</p>` : ""}
+            </li>`;
+        })
+        .join("")}
+    </ol>`;
 
-function renderTickets(section, data) {
-  if (data.tickets.length) {
-    renderList(section, data);
-    return;
-  }
-
-  view.innerHTML = `
-    ${pageHead(section.title, section.hint)}
-    <section class="panel">
-      <ol class="tickets">
-        <li class="ticket is-placeholder">
-          <span class="ticket-num">01</span>
-          <span>
-            <span class="ticket-title">Номер билета</span>
-            <span class="ticket-meta">Вопросы билета появятся здесь</span>
-          </span>
-        </li>
-      </ol>
-      ${emptyState(section.empty)}
-    </section>`;
+  document.querySelectorAll(".ticket-toggle").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.dataset.index);
+      study.ticket = study.ticket === index ? null : index;
+      render();
+    });
+  });
 }
 
 function render() {
   const data = Store.load();
   const id = currentId();
   renderNav();
-
-  if (id === "home") {
-    renderHome(data);
-    return;
+  if (id === "home") renderHome(data);
+  else if (id === "knowledge") renderKnowledge(data);
+  else if (id === "cards") renderCards(data);
+  else if (id === "tests") renderTests(data);
+  else if (id === "tickets") renderTickets(data);
+  else renderHome(data);
+  if (location.hash !== render.lastHash) {
+    window.scrollTo(0, 0);
+    render.lastHash = location.hash;
   }
-
-  const section = SECTIONS.find((item) => item.id === id);
-  if (id === "cards") renderCards(section, data);
-  else if (id === "tests") renderTests(section, data);
-  else if (id === "tickets") renderTickets(section, data);
-  else renderList(section, data);
 }
 
 window.addEventListener("hashchange", render);
